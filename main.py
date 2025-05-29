@@ -1,4 +1,5 @@
 import os
+import re
 import openai
 import base64
 import docx
@@ -33,6 +34,23 @@ def extract_text_from_pdf(file_bytes):
     except:
         return "⚠️ Unable to extract text from PDF"
 
+def extract_metadata(text):
+    claim_number = re.search(r"(Claim|File|Reference)[#:\s]+([A-Z0-9-]+)", text, re.IGNORECASE)
+    vin = re.search(r"\b([A-HJ-NPR-Z\d]{17})\b", text)
+    vehicle = re.search(r"\d{4}\s+[^\n]+?\b(?:SEDAN|COUPE|SUV|FWD|UTV|TRUCK|VAN|WAGON)[^\n]*", text, re.IGNORECASE)
+    return {
+        "claim_number": claim_number.group(2) if claim_number else "N/A",
+        "vin": vin.group(1) if vin else "N/A",
+        "vehicle_description": vehicle.group(0).strip() if vehicle else "N/A"
+    }
+
+def score_response(response_text):
+    violations = len(re.findall(r"(non-compliant|missing|error|issue|violation)", response_text, re.IGNORECASE))
+    if violations == 0:
+        return "100%"
+    score = max(0, 100 - (violations * 10))
+    return f"{score}%"
+
 @app.post("/vision-review")
 async def vision_review(
     files: List[UploadFile] = File(...),
@@ -65,25 +83,11 @@ async def vision_review(
             texts.append(f"⚠️ Skipped unsupported file: {file.filename}")
 
     text_combined = "\n\n".join(texts)
-
-    text_block = {
-        "type": "text",
-        "text": f"""
-You are an expert auto damage appraiser. Compare the uploaded vehicle damage images to the provided written estimate and verify:
-1. Whether the described damage is visible in the photos.
-2. If the estimate complies with these client rules:
-{client_rules}
-
-Estimate Text:
-{text_combined}
-    # Extract metadata from combined text
     metadata = extract_metadata(text_combined)
 
-    # Prepare GPT input
     text_block = {
         "type": "text",
-        "text": f"""
-You are an expert auto damage appraiser. Compare the uploaded vehicle damage images to the written estimate and client rules below.
+        "text": f"""You are an expert auto damage appraiser. Compare the uploaded vehicle damage images to the written estimate and client rules below.
 
 Client Rules:
 {client_rules}
