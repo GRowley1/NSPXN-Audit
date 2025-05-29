@@ -76,6 +76,20 @@ You are an expert auto damage appraiser. Compare the uploaded vehicle damage ima
 
 Estimate Text:
 {text_combined}
+    # Extract metadata from combined text
+    metadata = extract_metadata(text_combined)
+
+    # Prepare GPT input
+    text_block = {
+        "type": "text",
+        "text": f"""
+You are an expert auto damage appraiser. Compare the uploaded vehicle damage images to the written estimate and client rules below.
+
+Client Rules:
+{client_rules}
+
+Estimate Text:
+{text_combined}
 """
     }
 
@@ -83,18 +97,23 @@ Estimate Text:
         response = openai.chat.completions.create(
             model="gpt-4o",
             messages=[
-                {
-                    "role": "system",
-                    "content": "You are a compliance-focused auto damage reviewer."
-                },
-                {
-                    "role": "user",
-                    "content": images + [text_block]
-                }
+                {"role": "system", "content": "You are a compliance-focused auto damage reviewer. Return detailed findings."},
+                {"role": "user", "content": images + [text_block]}
             ],
             max_tokens=2000,
             temperature=0.2
         )
-        return { "file_number": file_number, "result": response.choices[0].message.content }
+
+        result_text = response.choices[0].message.content
+        score = score_response(result_text)
+
+        return {
+            "file_number": file_number,
+            "claim_number": metadata["claim_number"],
+            "vin": metadata["vin"],
+            "vehicle": metadata["vehicle_description"],
+            "score": score,
+            "result": result_text
+        }
     except Exception as e:
         return { "error": str(e) }
