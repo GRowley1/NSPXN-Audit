@@ -37,6 +37,7 @@ async def upload_files(files: list[UploadFile] = File(...)):
         with open(path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
         filenames.append(file.filename)
+        print(f"Saved file: {file.filename} to {path}")
     return {"filenames": filenames}
 
 def extract_text_from_file(filepath):
@@ -68,44 +69,33 @@ def generate_ai_comparison(texts):
     )
     return response.choices[0].message["content"]
 
-import logging
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
 @app.post("/analyze")
 async def analyze():
     try:
         files = os.listdir(UPLOAD_DIR)
+        print("Files found in uploads:", files)
         if not files:
             return JSONResponse(status_code=400, content={"error": "No files to analyze."})
 
         texts = []
-        for filename in files[:3]:  # Limit to 3 files
+        for filename in files[:3]:
             path = os.path.join(UPLOAD_DIR, filename)
             text = extract_text_from_file(path)
             if text:
-                texts.append(f"{filename}:\n{text[:2000]}")  # Limit to 2000 chars per file
+                print(f"Extracted text from: {filename}")
+                texts.append(f"{filename}:\n{text[:2000]}")
+            else:
+                print(f"No readable text found in: {filename}")
 
         if not texts:
             return JSONResponse(status_code=400, content={"error": "No readable content found."})
 
-        # Use OpenAI to generate comparison
         try:
-            prompt = (
-                "Compare and summarize the differences, similarities, and issues found in these auto estimate documents.\n\n"
-                + "\n\n---\n\n".join(texts)
-            )
-            response = openai.ChatCompletion.create(
-                model="gpt-4",  # Change to "gpt-3.5-turbo" if needed
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=1000
-            )
-            summary_text = response.choices[0].message["content"]
+            summary_text = generate_ai_comparison(texts)
         except Exception as e:
+            print("OpenAI API error:", str(e))
             return JSONResponse(status_code=500, content={"error": f"OpenAI error: {str(e)}"})
 
-        # Generate PDF from summary
         pdf_path = os.path.join(STATIC_DIR, "ReviewReport.pdf")
         pdf = FPDF()
         pdf.add_page()
@@ -119,5 +109,5 @@ async def analyze():
         }
 
     except Exception as e:
+        print("Server error:", str(e))
         return JSONResponse(status_code=500, content={"error": str(e)})
-
