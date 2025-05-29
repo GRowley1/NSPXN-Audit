@@ -39,11 +39,16 @@ async def vision_review(
                 }
             })
         else:
-            texts.append(contents.decode("utf-8", errors="ignore"))
+            try:
+                texts.append(contents.decode("utf-8", errors="ignore"))
+            except:
+                texts.append("Could not decode file: " + file.filename)
 
     text_combined = "\n\n".join(texts)
 
-    prompt = f"""
+    text_block = {
+        "type": "text",
+        "text": f"""
 You are an expert auto damage appraiser. Compare the uploaded vehicle damage images to the provided written estimate and verify:
 1. Whether the described damage is visible in the photos.
 2. If the estimate complies with these client rules:
@@ -52,15 +57,21 @@ You are an expert auto damage appraiser. Compare the uploaded vehicle damage ima
 Estimate Text:
 {text_combined}
 """
-
-    messages = [{"role": "system", "content": "You are a compliance-focused auto damage reviewer."}]
-    messages += images  # Insert all image references first
-    messages.append({"role": "user", "content": prompt})
+    }
 
     try:
         response = openai.chat.completions.create(
             model="gpt-4o",
-            messages=messages,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a compliance-focused auto damage reviewer."
+                },
+                {
+                    "role": "user",
+                    "content": images + [text_block]
+                }
+            ],
             max_tokens=2000,
             temperature=0.2
         )
