@@ -4,10 +4,14 @@ from fastapi.responses import FileResponse, JSONResponse
 import os
 import shutil
 from fpdf import FPDF
+import fitz  # PyMuPDF
+import docx
+import openai
+
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 app = FastAPI()
 
-# Enable CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -35,21 +39,55 @@ async def upload_files(files: list[UploadFile] = File(...)):
         filenames.append(file.filename)
     return {"filenames": filenames}
 
+def extract_text_from_file(filepath):
+    try:
+        if filepath.endswith(".pdf"):
+            doc = fitz.open(filepath)
+            return "\n".join(page.get_text() for page in doc)
+        elif filepath.endswith(".docx"):
+            d = docx.Document(filepath)
+            return "\n".join(p.text for p in d.paragraphs)
+        elif filepath.endswith(".txt"):
+            with open(filepath, "r", encoding="utf-8") as f:
+                return f.read()
+        else:
+            return ""
+    except Exception as e:
+        return f"[Error reading {filepath}: {e}]"
+
+def generate_ai_comparison(texts):
+    prompt = (
+        "Compare and summarize the differences, similarities, and issues found in these auto estimate documents. "
+        "Mention mismatched parts, missing procedures, or consistency gaps.\n\n"
+        + "\n\n---\n\n".join(texts)
+    )
+    response = openai.ChatCompletion.create(
+        model="gpt-4",
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=1000
+    )
+    return response.choices[0].message["content"]
+
 @app.post("/analyze")
 async def analyze():
     try:
-        summary_lines = []
         files = os.listdir(UPLOAD_DIR)
         if not files:
-            return JSONResponse(status_code=400, content={"error": "No files found for analysis."})
+            return JSONResponse(status_code=400, content={"error": "No files to analyze."})
 
-        for filename in files:
-            if filename != "ReviewReport.pdf":
-                summary_lines.append(f"Reviewed file: {filename}")
+        texts = []
+        for filename in files[:3]:  # Limit to 3 files
+            path = os.path.join(UPLOAD_DIR, filename)
+            text = extract_text_from_file(path)
+            if text:
+                texts.append(f"{filename}:\n{text[:2000]}")  # Limit per file
 
-        summary_text = "\n".join(summary_lines)
+        if not texts:
+            return JSONResponse(status_code=400, content={"error": "No readable content found."})
 
-        # Generate PDF
+        summary_text = generate_ai_comparison(texts)
+
+        # Write PDF
         pdf_path = os.path.join(STATIC_DIR, "ReviewReport.pdf")
         pdf = FPDF()
         pdf.add_page()
