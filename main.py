@@ -35,13 +35,14 @@ def extract_text_from_pdf(file_bytes):
         return "⚠️ Unable to extract text from PDF"
 
 def extract_metadata(text):
-    claim_number = re.search(r"(Claim|File|Reference)[#:\s]+([A-Z0-9-]+)", text, re.IGNORECASE)
-    vin = re.search(r"\b([A-HJ-NPR-Z\d]{17})\b", text)
-    vehicle = re.search(r"\d{4}\s+[^\n]+?\b(?:SEDAN|COUPE|SUV|FWD|UTV|TRUCK|VAN|WAGON)[^\n]*", text, re.IGNORECASE)
+    claim_match = re.search(r"(?:Claim|File|Reference)\s*#?:?\s*([A-Z0-9-]{6,})", text, re.IGNORECASE)
+    vin_match = re.search(r"\b([A-HJ-NPR-Z\d]{17})\b", text)
+    vehicle_match = re.search(r"\d{4}\s+[^\n]+?(?:SEDAN|COUPE|SUV|FWD|UTV|TRUCK|VAN|WAGON)[^\n]*", text, re.IGNORECASE)
+
     return {
-        "claim_number": claim_number.group(2) if claim_number else "N/A",
-        "vin": vin.group(1) if vin else "N/A",
-        "vehicle_description": vehicle.group(0).strip() if vehicle else "N/A"
+        "claim_number": claim_match.group(1) if claim_match else "N/A",
+        "vin": vin_match.group(1) if vin_match else "N/A",
+        "vehicle_description": vehicle_match.group(0).strip() if vehicle_match else "N/A"
     }
 
 def score_response(response_text):
