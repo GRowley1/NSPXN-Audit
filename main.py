@@ -73,10 +73,6 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-try:
-    # Your OpenAI API call
-except Exception as e:
-    logger.error(f"An error occurred: {e}")
 @app.post("/analyze")
 async def analyze():
     try:
@@ -89,14 +85,27 @@ async def analyze():
             path = os.path.join(UPLOAD_DIR, filename)
             text = extract_text_from_file(path)
             if text:
-                texts.append(f"{filename}:\n{text[:2000]}")  # Limit per file
+                texts.append(f"{filename}:\n{text[:2000]}")  # Limit to 2000 chars per file
 
         if not texts:
             return JSONResponse(status_code=400, content={"error": "No readable content found."})
 
-        summary_text = generate_ai_comparison(texts)
+        # Use OpenAI to generate comparison
+        try:
+            prompt = (
+                "Compare and summarize the differences, similarities, and issues found in these auto estimate documents.\n\n"
+                + "\n\n---\n\n".join(texts)
+            )
+            response = openai.ChatCompletion.create(
+                model="gpt-4",  # Change to "gpt-3.5-turbo" if needed
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=1000
+            )
+            summary_text = response.choices[0].message["content"]
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"error": f"OpenAI error: {str(e)}"})
 
-        # Write PDF
+        # Generate PDF from summary
         pdf_path = os.path.join(STATIC_DIR, "ReviewReport.pdf")
         pdf = FPDF()
         pdf.add_page()
@@ -111,3 +120,4 @@ async def analyze():
 
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
+
