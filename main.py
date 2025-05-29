@@ -1,14 +1,10 @@
-from fastapi import FastAPI, UploadFile, File
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
 import os
-import shutil
-from fpdf import FPDF
-import fitz  # PyMuPDF
-import docx
 import openai
-
-openai.api_key = os.getenv("OPENAI_API_KEY")
+import base64
+from fastapi import FastAPI, File, UploadFile, Form
+from fastapi.middleware.cors import CORSMiddleware
+from typing import List
+from io import BytesIO
 
 app = FastAPI()
 
@@ -20,94 +16,54 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-UPLOAD_DIR = "uploads"
-STATIC_DIR = "static"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-os.makedirs(STATIC_DIR, exist_ok=True)
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
-@app.get("/")
-def root():
-    return {"message": "NSPXN AI Audit API is live"}
+@app.post("/vision-review")
+async def vision_review(
+    files: List[UploadFile] = File(...),
+    client_rules: str = Form(...),
+    file_number: str = Form(...)
+):
+    images = []
+    texts = []
 
-@app.post("/upload")
-async def upload_files(files: list[UploadFile] = File(...)):
-    filenames = []
     for file in files:
-        path = os.path.join(UPLOAD_DIR, file.filename)
-        with open(path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-        filenames.append(file.filename)
-        print(f"Saved file: {file.filename} to {path}")
-    return {"filenames": filenames}
-
-def extract_text_from_file(filepath):
-    try:
-        if filepath.endswith(".pdf"):
-            doc = fitz.open(filepath)
-            return "\n".join(page.get_text() for page in doc)
-        elif filepath.endswith(".docx"):
-            d = docx.Document(filepath)
-            return "\n".join(p.text for p in d.paragraphs)
-        elif filepath.endswith(".txt"):
-            with open(filepath, "r", encoding="utf-8") as f:
-                return f.read()
+        contents = await file.read()
+        ext = file.filename.lower()
+        if ext.endswith(('.jpg', '.jpeg', '.png')):
+            b64_image = base64.b64encode(contents).decode("utf-8")
+            images.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/jpeg;base64,{b64_image}"
+                }
+            })
         else:
-            return ""
-    except Exception as e:
-        return f"[Error reading {filepath}: {e}]"
+            texts.append(contents.decode("utf-8", errors="ignore"))
 
-def generate_ai_comparison(texts):
-    prompt = (
-        "Compare and summarize the differences, similarities, and issues found in these auto estimate documents. "
-        "Mention mismatched parts, missing procedures, or consistency gaps.\n\n"
-        + "\n\n---\n\n".join(texts)
-    )
-    response = openai.ChatCompletion.create(
-        model="gpt-4",
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=1000
-    )
-    return response.choices[0].message["content"]
+    text_combined = "\n\n".join(texts)
 
-@app.post("/analyze")
-async def analyze():
+    prompt = f"""
+You are an expert auto damage appraiser. Compare the uploaded vehicle damage images to the provided written estimate and verify:
+1. Whether the described damage is visible in the photos.
+2. If the estimate complies with these client rules:
+{client_rules}
+
+Estimate Text:
+{text_combined}
+"""
+
+    messages = [{"role": "system", "content": "You are a compliance-focused auto damage reviewer."}]
+    messages += images  # Insert all image references first
+    messages.append({"role": "user", "content": prompt})
+
     try:
-        files = os.listdir(UPLOAD_DIR)
-        print("Files found in uploads:", files)
-        if not files:
-            return JSONResponse(status_code=400, content={"error": "No files to analyze."})
-
-        texts = []
-        for filename in files[:3]:
-            path = os.path.join(UPLOAD_DIR, filename)
-            text = extract_text_from_file(path)
-            if text:
-                print(f"Extracted text from: {filename}")
-                texts.append(f"{filename}:\n{text[:2000]}")
-            else:
-                print(f"No readable text found in: {filename}")
-
-        if not texts:
-            return JSONResponse(status_code=400, content={"error": "No readable content found."})
-
-        try:
-            summary_text = generate_ai_comparison(texts)
-        except Exception as e:
-            print("OpenAI API error:", str(e))
-            return JSONResponse(status_code=500, content={"error": f"OpenAI error: {str(e)}"})
-
-        pdf_path = os.path.join(STATIC_DIR, "ReviewReport.pdf")
-        pdf = FPDF()
-        pdf.add_page()
-        pdf.set_font("Arial", size=12)
-        pdf.multi_cell(0, 10, "NSPXN AI Audit Summary\n\n" + summary_text)
-        pdf.output(pdf_path)
-
-        return {
-            "summary": summary_text,
-            "pdf_url": "/static/ReviewReport.pdf"
-        }
-
+        response = openai.chat.completions.create(
+            model="gpt-4o",
+            messages=messages,
+            max_tokens=2000,
+            temperature=0.2
+        )
+        return { "file_number": file_number, "result": response.choices[0].message.content }
     except Exception as e:
-        print("Server error:", str(e))
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return { "error": str(e) }

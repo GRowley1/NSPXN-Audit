@@ -1,8 +1,4 @@
 fastapi
 uvicorn
-aiofiles
 python-multipart
-fpdf
-python-docx
-pymupdf
 openai
