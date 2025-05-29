@@ -1,15 +1,16 @@
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
-import os, shutil
+import os
+import shutil
 from fpdf import FPDF
 
 app = FastAPI()
 
-# ✅ Proper CORS setup
+# CORS setup
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Use your domain for production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -17,6 +18,10 @@ app.add_middleware(
 
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+@app.get("/")
+def read_root():
+    return {"message": "NSPXN Auto Review API is live"}
 
 @app.post("/upload")
 async def upload_files(files: list[UploadFile] = File(...)):
@@ -50,8 +55,3 @@ async def analyze():
         return FileResponse(pdf_path, media_type="application/pdf", filename="ReviewReport.pdf")
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
-
-async def analyze():
-    result_text = analyze_files(UPLOAD_DIR)
-    pdf_path = create_pdf(result_text, UPLOAD_DIR)
-    return FileResponse(pdf_path, media_type='application/pdf', filename="ReviewReport.pdf")
