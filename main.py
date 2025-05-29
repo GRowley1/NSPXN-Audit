@@ -1,10 +1,11 @@
 import os
 import openai
 import base64
+import docx
+import pdfplumber
 from fastapi import FastAPI, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List
-from io import BytesIO
 
 app = FastAPI()
 
@@ -18,6 +19,20 @@ app.add_middleware(
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
+def extract_text_from_docx(file_bytes):
+    try:
+        document = docx.Document(file_bytes)
+        return "\n".join([p.text for p in document.paragraphs])
+    except:
+        return "⚠️ Unable to extract text from DOCX"
+
+def extract_text_from_pdf(file_bytes):
+    try:
+        with pdfplumber.open(file_bytes) as pdf:
+            return "\n".join([page.extract_text() for page in pdf.pages if page.extract_text()])
+    except:
+        return "⚠️ Unable to extract text from PDF"
+
 @app.post("/vision-review")
 async def vision_review(
     files: List[UploadFile] = File(...),
@@ -29,8 +44,8 @@ async def vision_review(
 
     for file in files:
         contents = await file.read()
-        ext = file.filename.lower()
-        if ext.endswith(('.jpg', '.jpeg', '.png')):
+        name = file.filename.lower()
+        if name.endswith(('.jpg', '.jpeg', '.png')):
             b64_image = base64.b64encode(contents).decode("utf-8")
             images.append({
                 "type": "image_url",
@@ -38,11 +53,16 @@ async def vision_review(
                     "url": f"data:image/jpeg;base64,{b64_image}"
                 }
             })
+        elif name.endswith(".txt"):
+            texts.append(contents.decode("utf-8", errors="ignore"))
+        elif name.endswith(".docx"):
+            from io import BytesIO
+            texts.append(extract_text_from_docx(BytesIO(contents)))
+        elif name.endswith(".pdf"):
+            from io import BytesIO
+            texts.append(extract_text_from_pdf(BytesIO(contents)))
         else:
-            try:
-                texts.append(contents.decode("utf-8", errors="ignore"))
-            except:
-                texts.append("Could not decode file: " + file.filename)
+            texts.append(f"⚠️ Skipped unsupported file: {file.filename}")
 
     text_combined = "\n\n".join(texts)
 
