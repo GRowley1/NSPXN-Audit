@@ -68,6 +68,15 @@ def generate_ai_comparison(texts):
     )
     return response.choices[0].message["content"]
 
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+try:
+    # Your OpenAI API call
+except Exception as e:
+    logger.error(f"An error occurred: {e}")
 @app.post("/analyze")
 async def analyze():
     try:
